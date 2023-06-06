@@ -12,6 +12,8 @@ using FModel.Views.Snooper.Animations;
 using FModel.Views.Snooper.Lights;
 using FModel.Views.Snooper.Models;
 using FModel.Views.Snooper.Shading;
+using SkiaSharp;
+using OpenTK.Graphics.OpenGL4;
 
 namespace FModel.Views.Snooper;
 
@@ -180,13 +182,32 @@ public class Options
     public bool TryGetTexture(UTexture2D o, bool fix, out Texture texture)
     {
         var guid = o.LightingGuid;
-        if (!Textures.TryGetValue(guid, out texture) && o.GetMipByMaxSize(UserSettings.Default.PreviewMaxTextureSize) is { } mip)
+        if (!Textures.TryGetValue(guid, out texture))
         {
-            TextureDecoder.DecodeTexture(mip, o.Format, o.IsNormalMap, _platform, out var data, out _);
+            if (o.GetMipByMaxSize(UserSettings.Default.PreviewMaxTextureSize) is { } mip)
+            {
+                TextureDecoder.DecodeTexture(mip, o.Format, o.IsNormalMap, _platform, out var data, out _);
 
-            texture = new Texture(data, mip.SizeX, mip.SizeY, o);
-            if (fix) TextureHelper.FixChannels(_game, texture);
-            Textures[guid] = texture;
+                texture = new Texture(data, mip.SizeX, mip.SizeY, o);
+                if (fix)
+                    TextureHelper.FixChannels(_game, texture);
+                Textures[guid] = texture;
+            }
+            else if (o.IsVirtual && o.PlatformData.VTData is FVirtualTextureBuiltData vtdata && TextureDecoder.Decode(o, vtdata, _platform) is SKBitmap bitmap)
+            {
+                texture = new Texture(bitmap.Bytes, bitmap.Width, bitmap.Height, o, bitmap.ColorType switch
+                {
+                    SKColorType.Rgb888x => PixelFormat.Rgb,
+                    SKColorType.Rgb565 => PixelFormat.Rgb,
+                    SKColorType.Bgra8888 => PixelFormat.Bgra,
+                    SKColorType.Gray8 => PixelFormat.Luminance,
+                    _ => PixelFormat.Rgba
+                }, bitmap.ColorType == SKColorType.Rgb565 ? PixelType.UnsignedShort565 : PixelType.UnsignedByte);
+                bitmap.Dispose();
+                if (fix)
+                    TextureHelper.FixChannels(_game, texture);
+                Textures[guid] = texture;
+            }
         }
         return texture != null;
     }
